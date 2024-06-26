@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>うごガヨ</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+
+        h1 {
+            margin-bottom: 20px;
+        }
+
+        canvas {
+            border: 1px solid black;
+            background-color: white;
+            cursor: crosshair;
+        }
+
+        .controls, .page-controls {
+            margin-bottom: 10px;
+        }
+
+        .controls > *, .page-controls > * {
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>うごくガヨウシ</h1>
+    <div class="controls">
+        <label for="colorPicker">色: </label>
+        <input type="color" id="colorPicker">
+        <button id="eraser">消しゴム</button>
+        <button id="clearCanvas">クリア</button>
+        <input type="file" id="imageLoader" accept="image/*">
+        <button id="download">ダウンロード</button>
+    </div>
+    <div class="page-controls">
+        <button id="prevPage">前のページ</button>
+        <span id="pageNumber">1</span>
+        <button id="nextPage">次のページ</button>
+        <button id="play">再生</button>
+        <label for="speedRange">速度: </label>
+        <input type="range" id="speedRange" min="100" max="2000" value="500">
+    </div>
+    <canvas id="drawingCanvas"></canvas>
+    <script src="https://cdn.jsdelivr.net/npm/gif.js/dist/gif.js"></script>
+    <script>
+        const canvas = document.getElementById('drawingCanvas');
+        const context = canvas.getContext('2d');
+        
+        canvas.width = 800;
+        canvas.height = 600;
+        let isDrawing = false;
+        let currentColor = '#000000';
+        let eraserMode = false;
+        let currentPage = 1;
+        const pages = {};
+        let isPlaying = false;
+        let playInterval;
+        let playSpeed = 500;
+        let gif;
+        
+        function clearCanvas() {
+            context.clearRect(0, 0, canvas.width, canvas.height);
+        }
+        
+        function saveCurrentPage() {
+            pages[currentPage] = canvas.toDataURL();
+        }
+        
+        function loadPage(pageNumber) {
+            clearCanvas();
+            if (pages[pageNumber]) {
+                const img = new Image();
+                img.src = pages[pageNumber];
+                img.onload = () => {
+                    context.drawImage(img, 0, 0);
+                };
+            }
+        }
+        
+        function updatePageNumber() {
+            document.getElementById('pageNumber').innerText = currentPage;
+        }
+        
+        function stopPlaying() {
+            clearInterval(playInterval);
+            isPlaying = false;
+        }
+        
+        document.getElementById('colorPicker').addEventListener('change', (event) => {
+            currentColor = event.target.value;
+            eraserMode = false;
+        });
+        
+        document.getElementById('eraser').addEventListener('click', () => {
+            eraserMode = true;
+        });
+        
+        document.getElementById('clearCanvas').addEventListener('click', () => {
+            clearCanvas();
+        });
+        
+        document.getElementById('prevPage').addEventListener('click', () => {
+            if (isPlaying) stopPlaying();
+            saveCurrentPage();
+            currentPage = Math.max(currentPage - 1, 1);
+            updatePageNumber();
+            loadPage(currentPage);
+        });
+        
+        document.getElementById('nextPage').addEventListener('click', () => {
+            if (isPlaying) stopPlaying();
+            saveCurrentPage();
+            currentPage += 1;
+            updatePageNumber();
+            loadPage(currentPage);
+        });
+        
+        document.getElementById('play').addEventListener('click', () => {
+            if (isPlaying) {
+                stopPlaying();
+                return;
+            }
+            isPlaying = true;
+            let startPage = 1;
+            playInterval = setInterval(() => {
+                if (startPage > Object.keys(pages).length) {
+                    stopPlaying();
+                    return;
+                }
+                currentPage = startPage;
+                updatePageNumber();
+                loadPage(startPage);
+                startPage += 1;
+            }, playSpeed);
+        });
+        
+        document.getElementById('speedRange').addEventListener('input', (event) => {
+            playSpeed = event.target.value;
+            if (isPlaying) {
+                clearInterval(playInterval);
+                document.getElementById('play').click();
+            }
+        });
+        
+        document.getElementById('imageLoader').addEventListener('change', handleImage, false);
+        
+        function handleImage(e) {
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const img = new Image();
+                img.onload = function() {
+                    clearCanvas();
+                    context.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    saveCurrentPage();
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(e.target.files[0]);
+        }
+        
+        canvas.addEventListener('mousedown', (event) => {
+            if (isPlaying) stopPlaying();
+            isDrawing = true;
+            context.beginPath();
+            context.moveTo(event.offsetX, event.offsetY);
+        });
+        
+        canvas.addEventListener('mousemove', (event) => {
+            if (isDrawing) {
+                context.strokeStyle = eraserMode ? '#ffffff' : currentColor;
+                context.lineTo(event.offsetX, event.offsetY);
+                context.stroke();
+            }
+        });
+        
+        canvas.addEventListener('mouseup', () => {
+            isDrawing = false;
+            saveCurrentPage();
+        });
+        
+        canvas.addEventListener('mouseout', () => {
+            isDrawing = false;
+            saveCurrentPage();
+        });
+        
+        document.getElementById('download').addEventListener('click', async () => {
+            gif = new GIF({
+                workers: 2,
+                quality: 10,
+                width: canvas.width,
+                height: canvas.height
+            });
+            
+            for (let page = 1; page <= Object.keys(pages).length; page++) {
+                const img = new Image();
+                img.src = pages[page];
+                await new Promise(resolve => {
+                    img.onload = () => {
+                        context.clearRect(0, 0, canvas.width, canvas.height);
+                        context.drawImage(img, 0, 0);
+                        gif.addFrame(context, {copy: true, delay: playSpeed});
+                        resolve();
+                    };
+                });
+            }
+            
+            gif.on('finished', (blob) => {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = 'animation.gif';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                alert('ダウンロードが完了しました');
+            });
+            
+            gif.render();
+        });
+        
+        
+        saveCurrentPage();
+    </script>
+</body>
+</html>
